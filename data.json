@@ -1,0 +1,52 @@
+[
+  {
+    "id": "MP001",
+    "name": "Aarav Mehta",
+    "age": 24,
+    "gender": "Male",
+    "last_seen": "Andheri, Mumbai",
+    "missing_date": "2026-08-14",
+    "description": "5'9\", black hair, blue backpack",
+    "status": "Missing"
+  },
+  {
+    "id": "MP002",
+    "name": "Riya Sharma",
+    "age": 27,
+    "gender": "Female",
+    "last_seen": "Dadar, Mumbai",
+    "missing_date": "2026-08-21",
+    "description": "5'4\", brown hair, green jacket",
+    "status": "Missing"
+  },
+  {
+    "id": "MP003",
+    "name": "Kabir Patel",
+    "age": 19,
+    "gender": "Male",
+    "last_seen": "Pune",
+    "missing_date": "2026-07-30",
+    "description": "5'7\", curly hair, black hoodie",
+    "status": "Missing"
+  },
+  {
+    "id": "MP004",
+    "name": "Neel Joshi",
+    "age": 22,
+    "gender": "Male",
+    "last_seen": "Bandra, Mumbai",
+    "missing_date": "2026-09-02",
+    "description": "5'8\", short black hair, grey backpack",
+    "status": "Missing"
+  },
+  {
+    "id": "MP005",
+    "name": "Ananya Rao",
+    "age": 21,
+    "gender": "Female",
+    "last_seen": "Nagpur",
+    "missing_date": "2026-08-28",
+    "description": "5'5\", long black hair, white sneakers",
+    "status": "Missing"
+  }
+]
