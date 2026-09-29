@@ -1,355 +1,77 @@
-import json
-import os
-import ollama
 import gradio as gr
-from dotenv import load_dotenv
-from tavily import TavilyClient
+import json
+import google.generativeai as genai
 
-load_dotenv()
-
-MODEL = "qwen3-14b-64k:latest"
-
-with open("data.json", "r", encoding="utf-8") as f:
-    cases = json.load(f)
-
-tavily = TavilyClient(api_key=os.getenv("TAVILY_API_KEY"))
-
-activity_log = []
-
-
-def log(message):
-    activity_log.append(message)
-
-
-def search_cases(location=None, min_age=None, max_age=None, gender=None):
-    log("🔎 Searching synthetic case database...")
-
-    results = []
-
-    for person in cases:
-        if location and location.lower() not in person["last_seen"].lower():
-            continue
-
-        if min_age is not None and person["age"] < min_age:
-            continue
-
-        if max_age is not None and person["age"] > max_age:
-            continue
-
-        if gender and gender.lower() != person["gender"].lower():
-            continue
-
-        results.append(person)
-
-    log(f"✓ Database search returned {len(results)} record(s).")
-
-    return results
-
-
-def get_case(case_id):
-    log(f"📋 Retrieving case {case_id}...")
-
-    for person in cases:
-        if person["id"].lower() == case_id.lower():
-            log(f"✓ Case {case_id} retrieved.")
-            return person
-
-    log(f"⚠️ Case {case_id} was not found.")
-    return None
-
-
-def web_search(query):
-    log(f"🌐 Searching the web: {query}")
-
+# Securely load API key from external file to keep it hidden from the source code
+def get_api_key():
     try:
-        response = tavily.search(
-            query=query,
-            max_results=5
-        )
+        with open("key.txt", "r") as f:
+            content = f.read().strip()
+            if "=" in content:
+                return content.split("=")[1].strip()
+            return content
+    except FileNotFoundError:
+        return ""
 
-        results = []
+api_key = get_api_key()
+if api_key:
+    genai.configure(api_key=api_key)
 
-        for result in response.get("results", []):
-            results.append({
-                "title": result.get("title", ""),
-                "url": result.get("url", ""),
-                "content": result.get("content", "")
-            })
+# Initialize Gemini Model
+model = genai.GenerativeModel('gemini-3.5-flash-lite')
 
-        log(f"✓ Tavily returned {len(results)} web result(s).")
-
-        return results
-
-    except Exception as e:
-        log(f"❌ Tavily error: {str(e)}")
+def load_data():
+    try:
+        with open("data.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
         return []
 
+def query_agent(user_query):
+    if not api_key:
+        return "⚠️ Error: API key not configured properly. Make sure key.txt exists."
+    
+    data = load_data()
+    
+    if not data:
+        return "⚠️ Error: No missing persons data found in data.json."
+    
+    context = f"""
+    You are an AI assistant helping to track and locate missing persons based on a database. 
+    Here is the current database in JSON format:
+    {json.dumps(data, indent=2)}
+    
+    Answer the user's query based ONLY on the data provided above. 
+    If the answer cannot be found in the data, state that clearly.
+    
+    User Query: {user_query}
+    """
+    
+    try:
+        response = model.generate_content(context)
+        return response.text
+    except Exception as e:
+        return f"An error occurred while generating the response: {str(e)}"
 
-def investigate(query):
-    global activity_log
-
-    activity_log = []
-
-    log("🤖 Agent started.")
-    log(f"📝 Query: {query}")
-
-    system_prompt = """
-You are an AI investigation assistant operating on a synthetic
-missing-person demonstration database.
-
-Your job is to investigate user queries using the available tools.
-
-You have three tools:
-
-1. search_cases
-   Search the synthetic missing-person database using location,
-   age range, and gender.
-
-2. get_case
-   Retrieve the complete details of a specific case ID.
-
-3. web_search
-   Search the public web using Tavily when external information
-   would be useful.
-
-You should decide which tools are necessary to answer the user's query.
-
-Important rules:
-
-- The database contains completely fictional demonstration records.
-- Never claim that a person has been positively identified.
-- Never claim that two people are the same person.
-- Treat database records as synthetic demonstration data.
-- Clearly distinguish database information from web information.
-- Do not invent facts.
-- If web results are unrelated or insufficient, say so.
-- Give the user a concise investigation report.
-"""
-
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "search_cases",
-                "description": "Search the synthetic missing-person database by location, age range, and gender.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "location": {
-                            "type": "string",
-                            "description": "Location where the person was last seen."
-                        },
-                        "min_age": {
-                            "type": "integer",
-                            "description": "Minimum age."
-                        },
-                        "max_age": {
-                            "type": "integer",
-                            "description": "Maximum age."
-                        },
-                        "gender": {
-                            "type": "string",
-                            "description": "Gender filter."
-                        }
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "get_case",
-                "description": "Retrieve complete details for a case using its case ID.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "case_id": {
-                            "type": "string",
-                            "description": "Case ID such as MP001."
-                        }
-                    },
-                    "required": ["case_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "web_search",
-                "description": "Search the public web for information relevant to an investigation.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Web search query."
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        }
-    ]
-
-    messages = [
-        {
-            "role": "system",
-            "content": system_prompt
-        },
-        {
-            "role": "user",
-            "content": query
-        }
-    ]
-
-    for _ in range(6):
-
-        response = ollama.chat(
-            model=MODEL,
-            messages=messages,
-            tools=tools
-        )
-
-        message = response["message"]
-
-        messages.append(message)
-
-        tool_calls = message.get("tool_calls", [])
-
-        if not tool_calls:
-            log("🤖 Agent completed its investigation.")
-
-            report = message.get("content", "")
-
-            activity = "\n".join(activity_log)
-
-            return activity, report
-
-        for call in tool_calls:
-
-            function_name = call["function"]["name"]
-            arguments = call["function"].get("arguments", {})
-
-            if function_name == "search_cases":
-                result = search_cases(
-                    location=arguments.get("location"),
-                    min_age=arguments.get("min_age"),
-                    max_age=arguments.get("max_age"),
-                    gender=arguments.get("gender")
-                )
-
-            elif function_name == "get_case":
-                result = get_case(
-                    arguments.get("case_id")
-                )
-
-            elif function_name == "web_search":
-                result = web_search(
-                    arguments.get("query")
-                )
-
-            else:
-                result = {"error": "Unknown tool"}
-
-            messages.append({
-                "role": "tool",
-                "content": json.dumps(result, ensure_ascii=False)
-            })
-
-    log("⚠️ Agent reached the maximum investigation steps.")
-
-    return "\n".join(activity_log), "The investigation could not be completed within the allowed tool steps."
-
-
-def run_investigation(query):
-    if not query.strip():
-        return "Please enter an investigation query.", ""
-
-    activity, report = investigate(query)
-
-    return activity, report
-
-
-with gr.Blocks(
-    title="Missing Person Investigation AI",
-    theme=gr.themes.Soft()
-) as demo:
-
-    gr.Markdown(
-        """
-        # 🔎 Missing Person Investigation AI
-
-        ### AI-powered investigation assistant
-
-        Search a synthetic case database and optionally investigate
-        related information using web search.
-
-        **⚠️ Demonstration only — all case records are fictional.**
-        """
-    )
-
+# Gradio Frontend UI
+with gr.Blocks() as demo:
+    gr.Markdown("# 🕵️‍♂️ Missing Persons AI Agent")
+    gr.Markdown("Search and query the missing persons database using natural language.")
+    
     with gr.Row():
-
-        with gr.Column(scale=2):
-
-            query = gr.Textbox(
-                label="Investigation Query",
-                placeholder="Example: Find missing people aged 18-25 last seen in Mumbai and investigate related information.",
-                lines=4
-            )
-
-            investigate_button = gr.Button(
-                "🔎 Investigate",
-                variant="primary"
-            )
-
         with gr.Column(scale=1):
-
-            gr.Markdown(
-                """
-                ### Example Queries
-
-                **Database search**
-
-                Find missing people aged 18-25 last seen in Mumbai.
-
-                **Case investigation**
-
-                Investigate case MP001.
-
-                **Combined investigation**
-
-                Find young people missing from Mumbai and search the web for potentially relevant information.
-                """
+            query_input = gr.Textbox(
+                label="Ask a Question", 
+                placeholder="e.g. List all missing persons from Mumbai.",
+                lines=3
             )
-
-    gr.Markdown("## 🤖 Agent Activity")
-
-    activity_output = gr.Markdown(
-        value="Waiting for investigation..."
-    )
-
-    gr.Markdown("## 📋 Investigation Report")
-
-    report_output = gr.Markdown(
-        value="Your investigation report will appear here."
-    )
-
-    investigate_button.click(
-        fn=run_investigation,
-        inputs=query,
-        outputs=[activity_output, report_output]
-    )
-
-    gr.Markdown(
-        """
-        ---
-        **Demo Notice:** This application uses synthetic missing-person
-        records. Web search results are external information and should
-        not be interpreted as verified identification or evidence.
-        """
-    )
-
+            submit_btn = gr.Button("Search", variant="primary")
+            
+        with gr.Column(scale=2):
+            output_display = gr.Textbox(label="AI Response", lines=10, interactive=False)
+            
+    submit_btn.click(fn=query_agent, inputs=query_input, outputs=output_display)
+    query_input.submit(fn=query_agent, inputs=query_input, outputs=output_display)
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=gr.themes.Soft())
